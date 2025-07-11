@@ -1,0 +1,233 @@
+# Interactive Elements Requirements System
+
+This document describes the requirements system for interactive elements in the Grafana Documentation Plugin.
+
+## Overview
+
+Interactive elements in documentation content have two types of requirements that must be satisfied before they can be executed:
+
+1. **Tutorial-Specific Requirements**: Declared in the `data-requirements` attribute by content authors
+2. **Docs Plugin Requirements**: Built-in system rules that govern interactive behavior
+
+## Tutorial-Specific Requirements
+
+Tutorial-specific requirements are declared in the `data-requirements` attribute of interactive elements. Multiple requirements are comma-separated.
+
+### Supported Requirements
+
+#### `exists-reftarget`
+- **Purpose**: Ensures the target element exists in the DOM before the interactive action can be executed
+- **Usage**: Most common requirement for interactive elements
+- **Example**: `data-requirements="exists-reftarget"`
+
+#### `has-datasources`
+- **Purpose**: Ensures that Grafana has at least one configured data source
+- **Usage**: For interactive elements that require data sources to function
+- **Example**: `data-requirements="has-datasources"`
+
+### Combining Requirements
+
+Multiple requirements can be combined:
+```html
+<button data-requirements="exists-reftarget,has-datasources" 
+        data-targetaction="button" 
+        data-reftarget="Add Dashboard">
+  Click to add dashboard
+</button>
+```
+
+## Docs Plugin Requirements
+
+Docs plugin requirements are automatically enforced by the system and control interactive behavior.
+
+### Dual Workflow System
+
+The system supports two types of workflows:
+
+1. **Regular Workflow**: Sequential steps using "Show Me" and "Do It" buttons
+   - Follow strict sequential dependency rules
+   - Only one step enabled at a time within the workflow
+   - Steps must be completed in order
+
+2. **Section Workflows**: Independent workflows using "Do Section" buttons
+   - Each "do section" button is its own separate workflow
+   - Can be enabled simultaneously with regular workflow steps
+   - Function as parent containers for sequences of interactive steps
+
+### Sequential Dependency
+
+**Rule**: Only one step in a regular workflow can be enabled at a time. Later steps are automatically disabled until previous steps complete.
+
+**Implementation**:
+- Interactive elements are processed in DOM order
+- When an element fails its requirements check, all subsequent elements are automatically disabled
+- Only the first non-completed element gets requirements checking for performance
+- Visual state: `requirements-disabled` class with dimmed appearance
+
+**Example Flow**:
+```
+Step 1: ✅ Requirements met → Enabled
+Step 2: ❌ Requirements failed → Disabled  
+Step 3: 🚫 Auto-disabled (previous step failed)
+Step 4: 🚫 Auto-disabled (previous step failed)
+```
+
+### Completion State
+
+**Rule**: Once an interactive action completes successfully, the element becomes disabled to prevent re-execution.
+
+**Implementation**:
+- Completed elements are marked with `data-completed="true"`
+- Visual state: `requirements-completed` class with green background and checkmark
+- Button text is appended with "✓" to indicate completion
+
+**Example States**:
+```
+Before: [Do it]
+After:  [Do it ✓] (disabled, green background)
+```
+
+### Trust But Verify the First Step
+
+**Rule**: The first step of an interactive workflow is always checked for requirements when no other step has been completed.
+
+**Rationale**: Users need a place to start. This provides a special exception to the sequential dependency rule for the first step only.
+
+### Logical Step Grouping
+
+**Concept**: Interactive elements with the same `data-reftarget` and `data-targetaction` attributes belong to the same logical step.
+
+**Special Exception**: "Do section" buttons (`data-targetaction="sequence"`) are always treated as separate logical steps, regardless of their `reftarget` matching other elements.
+
+**Implementation**: 
+- "Show Me" and "Do It" buttons for the same action are grouped together
+- Requirements checking applies to the entire step, not individual buttons
+- When any button in a step completes, the entire step is marked as completed
+- All buttons in a step share the same enabled/disabled state
+
+**Example**:
+```html
+<!-- These buttons belong to the same logical step -->
+<button data-reftarget="Save Dashboard" data-targetaction="button" data-button-type="show">Show me</button>
+<button data-reftarget="Save Dashboard" data-targetaction="button" data-button-type="do">Do it</button>
+
+<!-- This "do section" button is its own separate logical step -->
+<button data-reftarget="Save Dashboard" data-targetaction="sequence" data-button-type="do">Do section</button>
+```
+
+## Element States
+
+The requirements system manages several visual states:
+
+| Class | Description | Button State | Visual Appearance |
+|-------|-------------|--------------|-------------------|
+| `requirements-checking` | Requirements being validated | Enabled | Loading spinner |
+| `requirements-satisfied` | All requirements met | Enabled | Normal appearance |
+| `requirements-failed` | Tutorial-specific requirements not met | Disabled | Dimmed, error tooltip |
+| `requirements-disabled` | Disabled due to sequential dependency | Disabled | Very dimmed |
+| `requirements-completed` | Action already completed | Disabled | Green background, checkmark |
+
+## Technical Implementation
+
+### Event System Architecture
+
+**Unified Event Handling**: The system uses a single, modern event handling architecture:
+
+- **Direct Click Handlers**: Interactive elements use direct click event listeners attached via `attachInteractiveEventListeners()`
+- **Requirements Rechecking**: Completion events trigger automatic requirements rechecking via `interactive-action-completed` events
+- **Mutation Monitoring**: DOM changes are monitored to detect new interactive content
+
+**Infinite Loop Prevention**:
+- **Mutation Observer Filtering**: Only monitors changes to `data-requirements` and `data-reftarget` attributes
+- **Interactive Content Detection**: DOM changes only trigger rechecking if actual interactive elements are added/removed
+- **Debounced Rechecking**: Multiple rapid changes are batched to prevent excessive processing
+
+### DOM Attributes
+
+- `data-requirements`: Comma-separated list of tutorial-specific requirements
+- `data-completed`: Set to "true" when action is completed
+- `data-original-text`: Stores original button text for restoration
+- `data-listener-attached`: Marks elements with modern click handlers attached
+
+### Processing Order
+
+1. **Element Discovery**: Find all elements with `[data-requirements]` in DOM order
+2. **Completion Check**: Skip if `data-completed="true"`
+3. **Sequential Check**: Disable if previous element failed (regular workflow only)
+4. **Tutorial-Specific Check**: Validate declared requirements
+5. **State Update**: Apply appropriate visual state
+
+### Performance Optimization
+
+When using sequential mode, the system stops checking requirements as soon as one element fails, automatically disabling all subsequent elements. This provides:
+
+- **Performance**: Avoids unnecessary requirement checks
+- **User Experience**: Clear indication that previous steps must be completed
+- **Logical Flow**: Enforces step-by-step progression
+
+## Usage Examples
+
+### Basic Interactive Element
+```html
+<span class="interactive" 
+      data-targetaction="button" 
+      data-reftarget="Save Dashboard" 
+      data-requirements="exists-reftarget">
+  Click the Save Dashboard button
+</span>
+```
+
+### Sequential Tutorial Steps
+```html
+<!-- Step 1: Will be checked first -->
+<button data-requirements="has-datasources" 
+        data-targetaction="button" 
+        data-reftarget="Add Panel">
+  Add a new panel
+</button>
+
+<!-- Step 2: Only enabled if Step 1 succeeds -->
+<button data-requirements="exists-reftarget" 
+        data-targetaction="formfill" 
+        data-reftarget="#panel-title" 
+        data-targetvalue="My Panel">
+  Set panel title
+</button>
+
+<!-- Step 3: Only enabled if Step 2 succeeds -->
+<button data-requirements="exists-reftarget" 
+        data-targetaction="button" 
+        data-reftarget="Apply">
+  Apply changes
+</button>
+```
+
+## Configuration
+
+### Sequential Mode (Default)
+```typescript
+await checkAllElementRequirements(container, checkFn, true);
+```
+
+### Parallel Mode
+```typescript
+await checkAllElementRequirements(container, checkFn, false);
+```
+
+Sequential mode is recommended for tutorial-style content where step order matters. Parallel mode can be used for independent interactive elements that don't depend on each other.
+
+## Error Handling
+
+- **Unknown Requirements**: Elements with unsupported requirements are marked as failed
+- **Requirement Check Errors**: Network or validation errors mark elements as failed
+- **Missing Elements**: Elements that can't be found are marked as failed
+- **Graceful Degradation**: System continues processing other elements when individual checks fail
+
+## Accessibility
+
+The requirements system includes accessibility features:
+
+- **ARIA Attributes**: `aria-disabled` reflects button state
+- **Tooltips**: Disabled buttons show reason via `title` attribute
+- **Visual Indicators**: Color and opacity changes provide visual feedback
+- **Screen Readers**: State changes are announced through ARIA attributes

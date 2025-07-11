@@ -2,6 +2,7 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { fetchDataSources } from './context-data-fetcher';
 import { addGlobalInteractiveStyles } from '../styles/interactive.styles';
+import { markElementCompleted, waitForReactUpdates, groupInteractiveElementsByStep, markStepCompleted, InteractiveStep } from './requirements.util';
 
 export interface InteractiveRequirementsCheck {
   requirements: string;
@@ -167,6 +168,8 @@ export function useInteractiveElements() {
   }
 
   function setInteractiveState(element: HTMLElement, state: 'idle' | 'running' | 'completed' | 'error') {
+    console.log(`🎭 Setting interactive state: ${state} for element:`, element);
+    
     // Remove all state classes
     element.classList.remove('interactive-running', 'interactive-completed', 'interactive-error');
     
@@ -175,56 +178,64 @@ export function useInteractiveElements() {
       element.classList.add(`interactive-${state}`);
     }
     
-    // Dispatch custom event when action completes
+    // Handle completion state (implicit requirement #2)
     if (state === 'completed') {
-      // Direct approach: Find and re-check ALL elements with requirements immediately
-       setTimeout(() => {
-         const allElementsWithRequirements = document.querySelectorAll('[data-requirements]');
-         
-         if (allElementsWithRequirements.length > 0) {
-           Promise.all(Array.from(allElementsWithRequirements).map(async (element, index) => {
-             const htmlElement = element as HTMLElement;
-             
-             try {
-               const result = await checkElementRequirements(htmlElement);
-                             
-               // Update element state directly
-               htmlElement.classList.remove('requirements-satisfied', 'requirements-failed', 'requirements-checking');
-               
-               if (result.pass) {
-                 htmlElement.classList.add('requirements-satisfied');
-                 if (htmlElement.tagName.toLowerCase() === 'button') {
-                   (htmlElement as HTMLButtonElement).disabled = false;
-                   htmlElement.setAttribute('aria-disabled', 'false');
-                   const originalText = htmlElement.getAttribute('data-original-text');
-                   if (originalText) {
-                     htmlElement.textContent = originalText;
-                   }
-                 }
-               } else {
-                 htmlElement.classList.add('requirements-failed');
-                 if (htmlElement.tagName.toLowerCase() === 'button') {
-                   (htmlElement as HTMLButtonElement).disabled = true;
-                   htmlElement.setAttribute('aria-disabled', 'true');
-                   const requirements = htmlElement.getAttribute('data-requirements') || '';
-                   htmlElement.title = `Requirements not met: ${requirements}`;
-                 }
-               }
-             } catch (error) {
-               console.error(`Error checking element ${index + 1}:`, error);
-               // Set failed state
-               htmlElement.classList.remove('requirements-satisfied', 'requirements-failed', 'requirements-checking');
-               htmlElement.classList.add('requirements-failed');
-               if (htmlElement.tagName.toLowerCase() === 'button') {
-                 (htmlElement as HTMLButtonElement).disabled = true;
-                 htmlElement.setAttribute('aria-disabled', 'true');
-               }
-             }
-           })).catch(error => {
-             console.error('Error during requirement re-check:', error);
-           });
+      console.log('🎯 Marking element as completed:', {
+        element: element.tagName,
+        reftarget: element.getAttribute('data-reftarget'),
+        targetaction: element.getAttribute('data-targetaction'),
+        buttonType: element.getAttribute('data-button-type'),
+        textContent: element.textContent?.trim()
+      });
+      
+      // Use centralized step management to mark the entire logical step as completed
+      const reftarget = element.getAttribute('data-reftarget');
+      const targetaction = element.getAttribute('data-targetaction');
+      
+      if (reftarget && targetaction) {
+        // Find all interactive elements in the document to identify the step
+        const allInteractiveElements = document.querySelectorAll('[data-requirements]') as NodeListOf<HTMLElement>;
+        const elementArray = Array.from(allInteractiveElements);
+        
+        // Group elements by step using centralized logic
+        const steps = groupInteractiveElementsByStep(elementArray);
+        
+        // Find the step that contains this element
+        const elementStep = steps.find((step: InteractiveStep) => 
+          step.reftarget === reftarget && 
+          step.targetaction === targetaction
+        );
+        
+        if (elementStep) {
+          console.log(`📋 Marking entire step as completed: ${elementStep.buttons.length} buttons with reftarget="${reftarget}" targetaction="${targetaction}"`);
+          
+          // Use centralized step completion logic
+          markStepCompleted(elementStep);
+          
+          elementStep.buttons.forEach((button: HTMLElement, index: number) => {
+            const buttonType = button.getAttribute('data-button-type') || 'unknown';
+            console.log(`  ✅ Marking button ${index + 1} as completed: ${buttonType}`);
+          });
+        } else {
+          // Fallback: mark just this element as completed
+          console.log('⚠️ No step found, marking only this element as completed');
+          markElementCompleted(element);
         }
-      }, 150); // Small delay to let DOM settle
+      } else {
+        // Fallback: mark just this element as completed
+        console.log('⚠️ No reftarget/targetaction found, marking only this element as completed');
+        markElementCompleted(element);
+      }
+      
+      // Wait for React updates to complete, then dispatch event to trigger requirements re-check
+      waitForReactUpdates().then(() => {
+        console.log('🔔 Dispatching interactive-action-completed event');
+        const event = new CustomEvent('interactive-action-completed', {
+          detail: { element, state }
+        });
+        document.dispatchEvent(event);
+        console.log('✅ Event dispatched successfully');
+      });
     }
   }
 
@@ -264,9 +275,9 @@ export function useInteractiveElements() {
       
       // Mark as completed after successful execution
       if (interactiveElement) {
-        setTimeout(() => {
+        waitForReactUpdates().then(() => {
           setInteractiveState(interactiveElement, 'completed');
-        }, 500);
+        });
       }
     } catch (error) {
       console.error("Error in interactiveFocus:", error);
@@ -298,9 +309,9 @@ export function useInteractiveElements() {
       
       // Mark as completed after successful execution
       if (interactiveElement) {
-        setTimeout(() => {
+        waitForReactUpdates().then(() => {
           setInteractiveState(interactiveElement, 'completed');
-        }, 500);
+        });
       }
     } catch (error) {
       console.error("Error in interactiveButton:", error);
@@ -458,9 +469,9 @@ export function useInteractiveElements() {
       
       // Mark as completed after successful execution
       if (interactiveElement) {
-        setTimeout(() => {
+        waitForReactUpdates().then(() => {
           setInteractiveState(interactiveElement, 'completed');
-        }, 500);
+        });
       }
       
     } catch (error) {
@@ -683,7 +694,7 @@ export function useInteractiveElements() {
   /**
    * Core requirement checking logic that works with InteractiveElementData
    */
-  const checkRequirementsFromData = async (data: InteractiveElementData): Promise<InteractiveRequirementsCheck> => {
+  const checkRequirementsFromData = useCallback(async (data: InteractiveElementData): Promise<InteractiveRequirementsCheck> => {
     const requirements = data.requirements;
     if (!requirements) {
       console.warn("No requirements found for interactive element");
@@ -718,15 +729,15 @@ export function useInteractiveElements() {
       pass: results.every(result => result.pass),
       error: results,  
     }
-  }
+  }, []);
 
   /**
    * Check requirements directly from a DOM element
    */
-  const checkElementRequirements = async (element: HTMLElement): Promise<InteractiveRequirementsCheck> => {
+  const checkElementRequirements = useCallback(async (element: HTMLElement): Promise<InteractiveRequirementsCheck> => {
     const data = extractInteractiveDataFromElement(element);
     return checkRequirementsFromData(data);
-  }
+  }, [checkRequirementsFromData]);
 
   /**
    * Enhanced function that returns both requirements check and extracted data
@@ -899,110 +910,7 @@ export function useInteractiveElements() {
     };
   }, [attachInteractiveEventListeners, detachInteractiveEventListeners, nodeContainsInteractiveElements]);
 
-  // Keep the old custom event system for backward compatibility, but it should no longer be needed
-  useEffect(() => { // eslint-disable-line react-hooks/exhaustive-deps
-    // Note, that rather than use await here we're using regular promises, because this is an 
-    // event handler (which doesn't return promises, fire and forget)
-    const handleCustomEvent = (event: CustomEvent) => {
-      
-      // Find the interactive element that triggered this event
-      let interactiveElement: HTMLElement | null = null;
-      
-      // Check if the event has an element reference in the detail (temporary compatibility)
-      if (event.detail && event.detail.sourceElement) {
-        interactiveElement = event.detail.sourceElement as HTMLElement;
-      } else {
-        // For events dispatched on document, we need to find the interactive element
-        // that was clicked. We'll use a combination of approaches:
-        
-        // 1. Check recently focused element
-        const activeElement = document.activeElement as HTMLElement;
-        if (activeElement && activeElement.hasAttribute('data-targetaction')) {
-          interactiveElement = activeElement;
-        } else if (activeElement && typeof activeElement.closest === 'function') {
-          interactiveElement = activeElement.closest('[data-targetaction]') as HTMLElement;
-        }
-        
-        // 2. If still not found, look for elements that match the event type pattern
-        if (!interactiveElement) {
-          // Extract the action type from event name (e.g., 'highlight' from 'interactive-highlight-show')
-          const eventAction = event.type.replace('interactive-', '').replace('-show', '');
-          const candidateElements = document.querySelectorAll(`[data-targetaction="${eventAction}"]`);
-          
-          if (candidateElements.length === 1) {
-            // If there's only one element with this action type, it's likely the one
-            interactiveElement = candidateElements[0] as HTMLElement;
-          } else if (candidateElements.length > 1) {
-            console.warn(`Multiple elements found with action "${eventAction}". Cannot determine which triggered the event.`);
-            // Use the first one as fallback, but this is not ideal
-            interactiveElement = candidateElements[0] as HTMLElement;
-          }
-        }
-      }
-      
-      if (!interactiveElement) {
-        console.warn("No interactive element found for event:", event.type);
-        console.warn("Available interactive elements:", document.querySelectorAll('[data-targetaction]'));
-        return;
-      }
-
-      // Extract data from the element instead of using event.detail
-      const data = extractInteractiveDataFromElement(interactiveElement);
-      
-      // Check requirements is important. You can't click a button if it doesn't exist on the 
-      // screen.  You can't fill a form out that doesn't exist, and so forth.  This gives us the
-      // ability to represent any number of requirements (you must have log data in order to use Explore Logs)
-      // that have to be satisifed before an interactive element will "work".
-      checkRequirementsFromData(data).then(requirementsCheck => {
-        if(!requirementsCheck.pass) {
-          console.warn("Requirements not met for interactive element:", data);
-          console.warn("Requirements check results:", requirementsCheck);
-          return;
-        }
-
-        // Dispatch interactive event, depending on its type.
-        if (event.type === "interactive-highlight") {
-          interactiveFocus(data, true); // Do mode - click
-        } else if (event.type === "interactive-highlight-show") {
-          interactiveFocus(data, false); // Show mode - don't click
-        } else if (event.type === "interactive-button") {
-          interactiveButton(data, true); // Do mode - click
-        } else if (event.type === "interactive-button-show") {
-          interactiveButton(data, false); // Show mode - don't click
-        } else if (event.type === "interactive-formfill") {
-          interactiveFormFill(data, true); // Do mode - fill form
-        } else if (event.type === "interactive-formfill-show") {
-          interactiveFormFill(data, false); // Show mode - don't fill
-        } else if(event.type === 'interactive-sequence') {
-          interactiveSequence(data, false); // Do mode - full sequence
-        } else if(event.type === 'interactive-sequence-show') {
-          interactiveSequence(data, true); // Show mode - highlight only
-        } else {
-          console.warn("Unknown event type:", event.type);
-        }
-      })
-      .catch(error => {
-        console.error("Error in handleCustomEvent/checkRequirements:", error);
-      });
-    };
-
-    const events = [
-      'interactive-highlight',
-      'interactive-highlight-show',
-      'interactive-formfill',
-      'interactive-formfill-show',
-      'interactive-button',
-      'interactive-button-show',
-      'interactive-sequence',
-      'interactive-sequence-show',
-    ];
-
-    events.forEach(e => document.addEventListener(e, handleCustomEvent as EventListener));
-
-    return () => {
-      events.forEach(e => document.removeEventListener(e, handleCustomEvent as EventListener));
-    };
-  }, [interactiveButton, interactiveFocus, interactiveFormFill, interactiveSequence]);
+  // Legacy custom event system removed - all interactions now handled by modern direct click handlers
 
   return {
     interactiveFocus,
