@@ -101,11 +101,7 @@ class CombinedLearningJourneyPanel extends SceneObjectBase<CombinedPanelState> {
     if (activeTab && activeTab.id !== 'recommendations') {
       // If we have an active tab but no content, load it
       if (!activeTab.content && !activeTab.isLoading && !activeTab.error) {
-        if (activeTab.type === 'docs') {
-          this.loadDocsTabContent(activeTab.id, activeTab.currentUrl || activeTab.baseUrl);
-        } else {
-          this.loadTabContent(activeTab.id, activeTab.currentUrl || activeTab.baseUrl);
-        }
+        this.loadTabContent(activeTab.id, activeTab.currentUrl || activeTab.baseUrl);
       }
     }
   }
@@ -361,11 +357,7 @@ class CombinedLearningJourneyPanel extends SceneObjectBase<CombinedPanelState> {
     // If switching to a tab that hasn't loaded content yet, load it
     const tab = this.state.tabs.find((t) => t.id === tabId);
     if (tab && tabId !== 'recommendations' && !tab.isLoading && !tab.error) {
-      if (tab.type === 'docs' && !tab.content) {
-        this.loadDocsTabContent(tabId, tab.currentUrl || tab.baseUrl);
-      } else if (tab.type !== 'docs' && !tab.content) {
-        this.loadTabContent(tabId, tab.currentUrl || tab.baseUrl);
-      }
+      this.loadTabContent(tabId, tab.currentUrl || tab.baseUrl);
     }
   }
 
@@ -427,59 +419,9 @@ class CombinedLearningJourneyPanel extends SceneObjectBase<CombinedPanelState> {
     this.saveTabsToStorage();
 
     // Load docs content for the tab
-    this.loadDocsTabContent(tabId, url);
+    this.loadTabContent(tabId, url);
 
     return tabId;
-  }
-
-  public async loadDocsTabContent(tabId: string, url: string) {
-    // Update tab to loading state
-    const updatedTabs = this.state.tabs.map((t) =>
-      t.id === tabId
-        ? {
-            ...t,
-            isLoading: true,
-            error: null,
-          }
-        : t
-    );
-    this.setState({ tabs: updatedTabs });
-
-    try {
-      const result = await fetchContent(url);
-
-      const finalUpdatedTabs = this.state.tabs.map((t) =>
-        t.id === tabId
-          ? {
-              ...t,
-              content: result.content,
-              isLoading: false,
-              error: null,
-              currentUrl: url,
-            }
-          : t
-      );
-      this.setState({ tabs: finalUpdatedTabs });
-
-      // Save tabs to storage after content is loaded
-      this.saveTabsToStorage();
-    } catch (error) {
-      console.error(`Failed to load docs content for tab ${tabId}:`, error);
-
-      const errorUpdatedTabs = this.state.tabs.map((t) =>
-        t.id === tabId
-          ? {
-              ...t,
-              isLoading: false,
-              error: error instanceof Error ? error.message : 'Failed to load documentation',
-            }
-          : t
-      );
-      this.setState({ tabs: errorUpdatedTabs });
-
-      // Save tabs to storage even when there's an error
-      this.saveTabsToStorage();
-    }
   }
 }
 
@@ -938,7 +880,11 @@ function CombinedPanelRenderer({ model }: SceneComponentProps<CombinedLearningJo
                         <div
                           className={styles.progressFill}
                           style={{
-                            width: `${((activeTab.content?.metadata.learningJourney?.currentMilestone || 0) / (activeTab.content?.metadata.learningJourney?.totalMilestones || 1)) * 100}%`,
+                            width: `${
+                              ((activeTab.content?.metadata.learningJourney?.currentMilestone || 0) /
+                                (activeTab.content?.metadata.learningJourney?.totalMilestones || 1)) *
+                              100
+                            }%`,
                           }}
                         />
                       </div>
@@ -976,7 +922,6 @@ function CombinedPanelRenderer({ model }: SceneComponentProps<CombinedLearningJo
                     />
                   </div>
                 )}
-
                 {/* Unified Content Renderer - works for both learning journeys and docs! */}
                 <div
                   id="inner-docs-content"

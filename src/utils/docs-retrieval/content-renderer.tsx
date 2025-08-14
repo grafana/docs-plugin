@@ -1,5 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { GrafanaTheme2 } from '@grafana/data';
+import { EmbeddedScene, SceneFlexItem, SceneFlexLayout } from '@grafana/scenes';
+import { Card, TabsBar, Tab, TabContent } from '@grafana/ui';
 
 import { RawContent, ContentParseResult } from './content.types';
 import { generateJourneyContentWithExtras } from './learning-journey-helpers';
@@ -248,6 +250,189 @@ function ContentProcessor({ html, contentType, baseUrl, onReady }: ContentProces
   );
 }
 
+// Build @grafana/scenes models from parsed elements when encountering whitelisted tags
+function buildScenesModel(element: ParsedElement | string): any | null {
+  if (typeof element === 'string') {
+    return null;
+  }
+  const type = typeof element.type === 'string' ? element.type.toLowerCase() : '';
+
+  switch (type) {
+    case 'embeddedscene': {
+      // Use the first non-text child as body if present
+      const firstChild = (element.children || []).find((c) => typeof c !== 'string') as ParsedElement | undefined;
+      const bodyModel = firstChild ? buildScenesModel(firstChild) : undefined;
+      // EmbeddedScene requires a body; fall back to empty flex layout
+      return new EmbeddedScene({
+        body: bodyModel ?? new SceneFlexLayout({ children: [] }),
+      });
+    }
+    case 'sceneflexlayout': {
+      const childrenModels = (element.children || [])
+        .map((c) => (typeof c !== 'string' ? buildScenesModel(c) : null))
+        .filter((c): c is any => Boolean(c));
+      return new SceneFlexLayout({ children: childrenModels });
+    }
+    case 'sceneflexitem': {
+      const firstChild = (element.children || []).find((c) => typeof c !== 'string') as ParsedElement | undefined;
+      const bodyModel = firstChild ? buildScenesModel(firstChild) : undefined;
+      const width = element.props?.width ?? element.props?.['data-width'];
+      const height = element.props?.height ?? element.props?.['data-height'];
+      return new SceneFlexItem({
+        ...(width ? ({ width } as any) : {}),
+        ...(height ? ({ height } as any) : {}),
+        ...(bodyModel ? { body: bodyModel } : {}),
+      });
+    }
+    default:
+      return null;
+  }
+}
+
+// Local wrapper to render a Scene model with activation lifecycle (similar to scenes' SceneComponentWrapper)
+function ScenesModelRenderer({ model }: { model: any }) {
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => {
+    if (!model) {
+      return;
+    }
+    const unsub = model.activate();
+    setTick((v) => v + 1);
+    return unsub;
+  }, [model]);
+
+  if (!model || (!model.isActive && !model.renderBeforeActivation)) {
+    return null;
+  }
+
+  const Component = (model.constructor && model.constructor.Component) || (() => null);
+  return <Component model={model} />;
+}
+
+// Whitelisted @grafana/ui React components by tag name
+const allowedUiComponents: Record<string, React.ElementType> = {
+  card: Card,
+  'card.heading': Card.Heading,
+  'card.description': Card.Description,
+  tab: Tab,
+  tabsbar: TabsBar,
+  tabcontent: TabContent,
+};
+
+// Special tabs state management
+function useTabsState(tabsData: Array<{ key: string; label: string }>) {
+  const [activeTab, setActiveTab] = React.useState(tabsData[0]?.key || '');
+
+  React.useEffect(() => {
+    if (tabsData.length > 0 && !activeTab) {
+      setActiveTab(tabsData[0].key);
+    }
+  }, [tabsData, activeTab]);
+
+  return { activeTab, setActiveTab };
+}
+
+// Special renderer for tabs structure
+function renderTabsStructure(element: ParsedElement): React.ReactNode {
+  console.log('[DocsPlugin] renderTabsStructure called with element:', element);
+
+  const tabsBarElement = element.children?.find(
+    (child) => typeof child !== 'string' && (child as any).props?.['data-element'] === 'tabs-bar'
+  ) as ParsedElement | undefined;
+
+  const tabContentElement = element.children?.find(
+    (child) => typeof child !== 'string' && (child as any).props?.['data-element'] === 'tab-content'
+  ) as ParsedElement | undefined;
+
+  console.log('[DocsPlugin] tabsBarElement found:', !!tabsBarElement);
+  console.log('[DocsPlugin] tabContentElement found:', !!tabContentElement);
+
+  if (!tabsBarElement || !tabContentElement) {
+    console.log('[DocsPlugin] Missing required tabs elements');
+    return null;
+  }
+
+  // Extract tab data from tabs-bar children
+  const tabElements =
+    (tabsBarElement.children?.filter(
+      (child) => typeof child !== 'string' && (child as any).props?.['data-element'] === 'tab'
+    ) as ParsedElement[]) || [];
+
+  const tabsData = tabElements.map((tabEl) => ({
+    key: tabEl.props?.['data-key'] || '',
+    label: tabEl.props?.['data-label'] || '',
+  }));
+
+  const { activeTab, setActiveTab } = useTabsState(tabsData);
+
+  // Extract content for each tab from tab-content children
+  // The content items are direct children of tab-content (like <pre> elements), not div[data-element="tab-content-item"]
+  const tabContentItems = tabContentElement.children || [];
+
+  console.log('[DocsPlugin] Tabs data:', tabsData);
+  console.log('[DocsPlugin] Tab content items found:', tabContentItems.length);
+  console.log('[DocsPlugin] Active tab:', activeTab, 'Active index:', parseInt(activeTab) || 0);
+  console.log(
+    '[DocsPlugin] Tab content items:',
+    tabContentItems.map((item, i) => {
+      if (typeof item === 'string') {
+        return {
+          index: i,
+          type: 'string',
+          props: null,
+          hasOriginalHTML: false,
+          childrenCount: 0,
+        };
+      } else {
+        return {
+          index: i,
+          type: (item as any).type,
+          props: (item as any).props,
+          hasOriginalHTML: !!(item as any).originalHTML,
+          childrenCount: (item as any).children?.length || 0,
+        };
+      }
+    })
+  );
+
+  return (
+    <div>
+      <TabsBar>
+        {tabsData.map((tab) => (
+          <Tab
+            key={tab.key}
+            label={tab.label}
+            active={activeTab === tab.key}
+            onChangeTab={() => setActiveTab(tab.key)}
+          />
+        ))}
+      </TabsBar>
+      <TabContent>
+        {(() => {
+          const contentIndex = parseInt(activeTab) || 0;
+          const content = tabContentItems[contentIndex];
+          console.log('[DocsPlugin] Rendering tab content index:', contentIndex, 'content:', content);
+          console.log('[DocsPlugin] Total tab content items:', tabContentItems.length);
+
+          if (content && typeof content !== 'string') {
+            // Render the content as raw HTML to avoid HTML parser interference
+            const originalHTML = (content as any).originalHTML;
+            if (originalHTML) {
+              console.log('[DocsPlugin] Rendering with originalHTML for tab', contentIndex);
+              return <div dangerouslySetInnerHTML={{ __html: originalHTML }} />;
+            }
+            // Fallback to normal rendering if no originalHTML
+            console.log('[DocsPlugin] Falling back to normal rendering for tab', contentIndex);
+            return renderParsedElement(content, 'tab-content');
+          }
+          console.log('[DocsPlugin] No content found for tab', contentIndex);
+          return null;
+        })()}
+      </TabContent>
+    </div>
+  );
+}
+
 function renderParsedElement(element: ParsedElement | ParsedElement[], key: string | number): React.ReactNode {
   if (Array.isArray(element)) {
     return element.map((child, i) => renderParsedElement(child, `${key}-${i}`));
@@ -264,7 +449,7 @@ function renderParsedElement(element: ParsedElement | ParsedElement[], key: stri
           requirements={element.props.requirements}
           objectives={element.props.objectives}
           hints={element.props.hints}
-          id={element.props.id} // Pass the HTML id attribute
+          id={element.props.id}
         >
           {element.children.map((child: ParsedElement | string, childIndex: number) =>
             typeof child === 'string' ? child : renderParsedElement(child, `${key}-child-${childIndex}`)
@@ -349,10 +534,95 @@ function renderParsedElement(element: ParsedElement | ParsedElement[], key: stri
         </ExpandableTable>
       );
     case 'raw-html':
-      // This should only be used for specific known-safe content
       console.warn('[DocsPlugin] Rendering raw HTML - this should be rare in the new architecture');
       return <div key={key} dangerouslySetInnerHTML={{ __html: element.props.html }} />;
     default:
+      // Special handling for tabs root: <div data-element="tabs">...</div>
+      if (typeof element.type === 'string' && element.type === 'div' && element.props?.['data-element'] === 'tabs') {
+        console.log('[DocsPlugin] Detected tabs root via data-element="tabs"');
+        return <React.Fragment key={key}>{renderTabsStructure(element)}</React.Fragment>;
+      }
+
+      // Special handling for tabs structure
+      if (typeof element.type === 'string' && element.type === 'div' && element.children) {
+        const hasTabsBar = element.children.some(
+          (child) => typeof child !== 'string' && (child as any).props?.['data-element'] === 'tabs-bar'
+        );
+        const hasTabContent = element.children.some(
+          (child) => typeof child !== 'string' && (child as any).props?.['data-element'] === 'tab-content'
+        );
+
+        if (hasTabsBar && hasTabContent) {
+          console.log('[DocsPlugin] Detected tabs structure, rendering with TabsBar/TabContent');
+          return <React.Fragment key={key}>{renderTabsStructure(element)}</React.Fragment>;
+        }
+      }
+
+      // Also check if this is a tab-content div that should be handled specially
+      if (
+        typeof element.type === 'string' &&
+        element.type === 'div' &&
+        element.props?.['data-element'] === 'tab-content'
+      ) {
+        console.log('[DocsPlugin] Skipping tab-content div - will be handled by tabs structure');
+        return null; // Skip rendering this div, it's handled by the tabs structure
+      }
+
+      // Skip ALL tab-content-item divs - they should only be rendered through the tabs structure
+      if (
+        typeof element.type === 'string' &&
+        element.type === 'div' &&
+        element.props?.['data-element'] === 'tab-content-item'
+      ) {
+        console.log('[DocsPlugin] Skipping tab-content-item div - will be handled by tabs structure only');
+        console.log('[DocsPlugin] Element type:', element.type, 'props:', element.props);
+        return null; // Always skip, tabs structure handles rendering
+      }
+
+      // Add debugging for all div elements to see what we're processing
+      if (typeof element.type === 'string' && element.type === 'div') {
+        console.log('[DocsPlugin] Processing div element with props:', element.props);
+      }
+
+      // Before treating as HTML element, check for whitelisted @grafana/scenes tags and render the model's Component
+      if (typeof element.type === 'string') {
+        const model = buildScenesModel(element);
+        if (model && (model as any).constructor && (model as any).constructor.Component) {
+          return <ScenesModelRenderer key={key} model={model} />;
+        }
+      }
+
+      // Whitelisted @grafana/ui components mapping
+      if (typeof element.type === 'string') {
+        const lowerType = element.type.toLowerCase();
+        const comp = allowedUiComponents[lowerType];
+        if (comp) {
+          const children = element.children
+            ?.map((child: ParsedElement | string, childIndex: number) =>
+              typeof child === 'string' ? child : renderParsedElement(child, `${key}-child-${childIndex}`)
+            )
+            .filter((child: React.ReactNode) => child !== null);
+
+          // Normalize boolean-like props that HTML parser might have dropped
+          console.log('comp', comp);
+          const uiProps: Record<string, any> = { ...element.props };
+          const originalHTML: string | undefined = (element as any).originalHTML;
+          if (typeof originalHTML === 'string') {
+            if (/\bnomargin\b/i.test(originalHTML)) {
+              uiProps.noMargin = true;
+            }
+            if (/\bnopadding\b/i.test(originalHTML)) {
+              uiProps.noPadding = true;
+            }
+            if (/\bisselected\b/i.test(originalHTML)) {
+              uiProps.isSelected = true;
+            }
+          }
+
+          return React.createElement(comp, { key, ...uiProps }, ...(children && children.length > 0 ? children : []));
+        }
+      }
+
       // Standard HTML elements - strict validation
       if (!element.type || (typeof element.type !== 'string' && typeof element.type !== 'function')) {
         console.error('[DocsPlugin] Invalid element type for parsed element:', element);
@@ -378,14 +648,11 @@ function renderParsedElement(element: ParsedElement | ParsedElement[], key: stri
       ]);
 
       if (typeof element.type === 'string' && voidElements.has(element.type)) {
-        // Void elements should not have children
         return React.createElement(element.type, { key, ...element.props });
       } else {
-        // Regular elements can have children
         const children = element.children
           ?.map((child: ParsedElement | string, childIndex: number) => {
             if (typeof child === 'string') {
-              // Preserve whitespace in text content
               return child.length > 0 ? child : null;
             }
             return renderParsedElement(child, `${key}-child-${childIndex}`);
@@ -393,7 +660,7 @@ function renderParsedElement(element: ParsedElement | ParsedElement[], key: stri
           .filter((child: React.ReactNode) => child !== null);
 
         return React.createElement(
-          element.type,
+          element.type as any,
           { key, ...element.props },
           ...(children && children.length > 0 ? children : [])
         );
