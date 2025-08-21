@@ -38,7 +38,7 @@ export const ConfigService = {
 
 // Export configuration values (with getters for dynamic access)
 export const getRecommenderServiceUrl = () => ConfigService.getConfig().recommenderServiceUrl;
-export const getDocsBaseUrl = () => ConfigService.getConfig().docsBaseUrl;
+export const getDocsBaseUrl = (): string => ConfigService.getConfig().docsBaseUrl ?? DEFAULT_DOCS_BASE_URL;
 export const getDocsUsername = () => ConfigService.getConfig().docsUsername;
 export const getDocsPassword = () => ConfigService.getConfig().docsPassword;
 export const getTutorialUrl = () => ConfigService.getConfig().tutorialUrl;
