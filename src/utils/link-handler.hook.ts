@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { GrafanaTheme2 } from '@grafana/data';
 import { safeEventHandler } from './safe-event-handler.util';
 import { reportAppInteraction, UserInteraction } from '../lib/analytics';
+import { getDocsBaseUrl } from '../constants';
 
 // Allowed GitHub URLs that can open in app tabs (from context.service.ts defaultRecommendations)
 const ALLOWED_GITHUB_URLS = [
@@ -172,11 +173,11 @@ export function useLinkClickHandler({ contentRef, activeTab, theme, model }: Use
               } catch (error) {
                 console.warn('Failed to resolve relative URL:', href, 'against base:', currentPageUrl, error);
                 // Fallback: assume it's relative to Grafana docs root
-                resolvedUrl = `https://grafana.com/docs/${href}`;
+                resolvedUrl = `${getDocsBaseUrl()}/docs/${href}`;
               }
             } else {
               // No base URL available, assume it's relative to Grafana docs root
-              resolvedUrl = `https://grafana.com/docs/${href}`;
+              resolvedUrl = `${getDocsBaseUrl()}/docs/${href}`;
             }
           }
 
@@ -366,7 +367,7 @@ export function useLinkClickHandler({ contentRef, activeTab, theme, model }: Use
 
         if (linkUrl) {
           // Related journey links open in new app tabs (learning journeys)
-          const fullUrl = linkUrl.startsWith('http') ? linkUrl : `https://grafana.com${linkUrl}`;
+          const fullUrl = linkUrl.startsWith('http') ? linkUrl : `${getDocsBaseUrl()}${linkUrl}`;
           model.openLearningJourney(fullUrl, linkTitle);
 
           // Track analytics for related journey clicks

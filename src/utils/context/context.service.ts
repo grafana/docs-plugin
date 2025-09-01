@@ -1,5 +1,5 @@
 import { getBackendSrv, config, locationService, getEchoSrv, EchoEventType } from '@grafana/runtime';
-import { getRecommenderServiceUrl } from '../../constants';
+import { getRecommenderServiceUrl, getDocsBaseUrl } from '../../constants';
 import { fetchContent, getJourneyCompletionPercentage } from '../docs-retrieval';
 import {
   ContextData,
@@ -273,10 +273,42 @@ export class ContextService {
 
       const data: RecommenderResponse = await response.json();
 
+      // testRecommendations
+      const testRecommendations: Recommendation[] = [
+        {
+          title: 'Components',
+          url: 'https://grafana.com/components/',
+          matchAccuracy: 1,
+        },
+      ];
+
       // Add bundled interactive recommendations (contextual based on current URL)
       const bundledRecommendations: Recommendation[] = this.getBundledInteractiveRecommendations(contextData);
 
-      const allRecommendations = [...(data.recommendations || []), ...bundledRecommendations];
+      // Add default recommendations for testing (with proper confidence scores)
+      const defaultRecommendations: Recommendation[] = [
+        {
+          title: 'Product Interactive Tutorial Demo',
+          url: 'https://raw.githubusercontent.com/moxious/dynamics-test/refs/heads/main/prometheus-datasource',
+          type: 'docs-page',
+          summary: 'A test of interactive elements.',
+          matchAccuracy: 0.6, // Above 0.5 threshold
+        },
+        {
+          title: 'Tutorial Environment Demo',
+          url: 'https://raw.githubusercontent.com/Jayclifford345/tutorial-environment/refs/heads/master/',
+          type: 'docs-page',
+          summary: 'Additional tutorial environment for testing interactive elements.',
+          matchAccuracy: 0.6, // Above 0.5 threshold
+        },
+      ];
+
+      const allRecommendations = [
+        ...this.replaceRecommendationBaseUrl(testRecommendations),
+        ...(this.replaceRecommendationBaseUrl(data.recommendations) || []),
+        ...bundledRecommendations,
+        ...defaultRecommendations,
+      ];
 
       // Process recommendations
       const processedRecommendations = await Promise.all(
@@ -678,7 +710,6 @@ export class ContextService {
    */
   private static getBundledInteractiveRecommendations(contextData: ContextData): Recommendation[] {
     const bundledRecommendations: Recommendation[] = [];
-
     try {
       // Load the index.json file that contains metadata for all bundled interactives
       const indexData: BundledInteractivesIndex = require('../../bundled-interactives/index.json');
@@ -713,5 +744,16 @@ export class ContextService {
     }
 
     return bundledRecommendations;
+  }
+
+  /**
+   * replace recommendation base url with the base url from the config
+   * ensures trailing slash and unstyled.html is added to the url
+   */
+  private static replaceRecommendationBaseUrl(recommendations: Recommendation[]): Recommendation[] {
+    return recommendations.map((rec) => ({
+      ...rec,
+      url: rec.url.replace('https://grafana.com', getDocsBaseUrl()) + 'unstyled.html',
+    }));
   }
 }

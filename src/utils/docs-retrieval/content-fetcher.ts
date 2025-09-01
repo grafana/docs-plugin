@@ -1,6 +1,7 @@
 // Unified content fetcher - replaces docs-fetcher.ts and single-docs-fetcher.ts
 // This version ONLY fetches content and extracts basic metadata
 // All DOM processing is moved to React components
+import { getDocsBaseUrl } from '../../constants';
 import {
   RawContent,
   ContentFetchResult,
@@ -207,6 +208,14 @@ async function fetchRawHtml(url: string, options: ContentFetchOptions): Promise<
   let redirectInfo: string | null = null;
 
   try {
+    // ensure url always ends with /unstyled.html
+    // handle trailing slashes and add unstyled.html
+    if (!url.endsWith('/unstyled.html')) {
+      url = url.replace(/\/$/, '') + '/unstyled.html';
+    }
+
+    console.log('fetching first response', url);
+
     const response = await fetch(url, fetchOptions);
 
     // Log redirect information if the final URL is different
@@ -219,10 +228,15 @@ async function fetchRawHtml(url: string, options: ContentFetchOptions): Promise<
       const html = await response.text();
       if (html && html.trim()) {
         // If this is a Grafana docs or tutorial URL, we MUST get the unstyled version
-        if (response.url.includes('grafana.com/docs/') || response.url.includes('grafana.com/tutorials/')) {
+        if (
+          response.url.includes(getDocsBaseUrl() + '/docs/') ||
+          response.url.includes(getDocsBaseUrl() + '/tutorials/')
+        ) {
           const finalUnstyledUrl = getUnstyledContentUrl(response.url);
           if (finalUnstyledUrl !== response.url) {
             try {
+              console.log('fetching unstyled response', finalUnstyledUrl);
+
               const unstyledResponse = await fetch(finalUnstyledUrl, fetchOptions);
               if (unstyledResponse.ok) {
                 const unstyledHtml = await unstyledResponse.text();
@@ -245,7 +259,10 @@ async function fetchRawHtml(url: string, options: ContentFetchOptions): Promise<
         // For non-Grafana docs/tutorials or when unstyled URL is same as regular URL
         if (redirectInfo) {
           console.warn(`Successfully fetched content after redirect: ${redirectInfo}`);
-        } else if (response.url.includes('grafana.com/docs/') || response.url.includes('grafana.com/tutorials/')) {
+        } else if (
+          response.url.includes(getDocsBaseUrl() + '/docs/') ||
+          response.url.includes(getDocsBaseUrl() + '/tutorials/')
+        ) {
           console.warn(`Successfully fetched Grafana content: ${response.url}`);
         }
         return html;
@@ -263,6 +280,7 @@ async function fetchRawHtml(url: string, options: ContentFetchOptions): Promise<
           if (baseUrlMatch) {
             const fullRedirectUrl = baseUrlMatch[1] + location;
             try {
+              console.log('fetching redirect response', fullRedirectUrl);
               const redirectResponse = await fetch(fullRedirectUrl, fetchOptions);
               if (redirectResponse.ok) {
                 const html = await redirectResponse.text();
@@ -297,6 +315,7 @@ async function fetchRawHtml(url: string, options: ContentFetchOptions): Promise<
 
       for (const githubUrl of githubVariations) {
         try {
+          console.log('fetching github response', githubUrl);
           const githubResponse = await fetch(githubUrl, fetchOptions);
           if (githubResponse.ok) {
             const githubHtml = await githubResponse.text();
@@ -326,35 +345,22 @@ async function fetchRawHtml(url: string, options: ContentFetchOptions): Promise<
 function generateGitHubVariations(url: string): string[] {
   const variations: string[] = [];
 
-  // Only try GitHub variations for GitHub URLs
-  if (url.includes('github.com') || url.includes('raw.githubusercontent.com')) {
-    // If it's a regular GitHub URL, try converting to raw.githubusercontent.com first (more targeted)
-    if (url.includes('github.com') && !url.includes('raw.githubusercontent.com')) {
-      // Handle tree URLs (directories) - convert to directory/unstyled.html
-      const treeMatch = url.match(/https:\/\/github\.com\/([^\/]+)\/([^\/]+)\/tree\/([^\/]+)\/(.+)/);
-      if (treeMatch) {
-        const [_fullMatch, owner, repo, branch, path] = treeMatch;
-        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/refs/heads/${branch}/${path}/unstyled.html`;
-        variations.push(rawUrl);
-      }
-
-      // Handle blob URLs (specific files)
-      const blobMatch = url.match(/https:\/\/github\.com\/([^\/]+)\/([^\/]+)\/blob\/([^\/]+)\/(.+)/);
-      if (blobMatch) {
-        const [_fullMatch, owner, repo, branch, path] = blobMatch;
-        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
-        variations.push(rawUrl);
-
-        // Also try unstyled version of raw URL
-        if (!rawUrl.includes('/unstyled.html')) {
-          variations.push(`${rawUrl}/unstyled.html`);
-        }
-      }
+  // If it's a regular GitHub URL, try converting to raw.githubusercontent.com
+  if (url.includes('github.com') && !url.includes('raw.githubusercontent.com')) {
+    // Handle tree URLs (directories) - convert to directory/unstyled.html
+    const treeMatch = url.match(/https:\/\/github\.com\/([^\/]+)\/([^\/]+)\/tree\/([^\/]+)\/(.+)/);
+    if (treeMatch) {
+      const [_fullMatch, owner, repo, branch, path] = treeMatch;
+      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/refs/heads/${branch}/${path}/unstyled.html`;
+      variations.push(rawUrl);
     }
 
-    // Generic fallback: try unstyled.html version (only if no specific conversion worked)
-    if (!url.includes('/unstyled.html') && variations.length === 0) {
-      variations.push(`${url.replace(/\/$/, '')}/unstyled.html`);
+    // Handle blob URLs (specific files)
+    const blobMatch = url.match(/https:\/\/github\.com\/([^\/]+)\/([^\/]+)\/blob\/([^\/]+)\/(.+)/);
+    if (blobMatch) {
+      const [_fullMatch, owner, repo, branch, path] = blobMatch;
+      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+      variations.push(rawUrl);
     }
   }
 
@@ -535,6 +541,7 @@ function getLearningJourneyBaseUrl(url: string): string {
 async function fetchLearningJourneyMetadataFromJson(baseUrl: string): Promise<Milestone[]> {
   try {
     const indexJsonUrl = `${baseUrl}/index.json`;
+    console.log('fetching index.json', indexJsonUrl);
     const response = await fetch(indexJsonUrl);
 
     if (response.ok) {
@@ -556,7 +563,7 @@ async function fetchLearningJourneyMetadataFromJson(baseUrl: string): Promise<Mi
             number: index + 1,
             title: item.params?.title || item.params?.menutitle || `Step ${index + 1}`,
             duration: '5-10 min', // Default duration as it's not in the data
-            url: `https://grafana.com${item.permalink || item.params?.permalink || ''}`,
+            url: `${getDocsBaseUrl()}${item.permalink || item.params?.permalink || ''}`,
             isActive: false,
           };
 
@@ -571,7 +578,7 @@ async function fetchLearningJourneyMetadataFromJson(baseUrl: string): Promise<Mi
 
           if (item.params?.cta?.image) {
             milestone.conclusionImage = {
-              src: `https://grafana.com${item.params.cta.image.src}`,
+              src: `${getDocsBaseUrl()}${item.params.cta.image.src}`,
               width: item.params.cta.image.width,
               height: item.params.cta.image.height,
             };
