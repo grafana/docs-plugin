@@ -40,11 +40,23 @@
         "title": "Grafana Pathfinder"
       }
     ],
+    "exposedComponents": [
+      {
+        "id": "grafana-grafanadocsplugin-app/pathfinder-help/v1",
+        "title": "Grafana Pathfinder",
+        "description": "Grafana Pathfinder documentation assistant"
+      }
+    ],
     "addedLinks": [
       {
         "targets": ["grafana/extension-sidebar/v0-alpha"],
         "description": "Opens Grafana Pathfinder",
         "title": "Documentation-Link"
+      },
+      {
+        "targets": ["grafana/app/topbar/help/v1"],
+        "description": "Open Grafana Pathfinder documentation assistant",
+        "title": "Grafana Pathfinder"
       },
       {
         "targets": ["grafana/commandpalette/action"],

@@ -1,4 +1,4 @@
-import { AppPlugin, type AppRootProps, PluginExtensionPoints, BusEventWithPayload } from '@grafana/data';
+import { AppPlugin, type AppRootProps, BusEventWithPayload, NavModelItem } from '@grafana/data';
 import { LoadingPlaceholder } from '@grafana/ui';
 import { getAppEvents } from '@grafana/runtime';
 import React, { Suspense, lazy } from 'react';
@@ -29,9 +29,7 @@ function openExtensionSidebar(pluginId: string, componentTitle: string, props?: 
 }
 
 const LazyApp = lazy(() => import('./components/App/App'));
-const LazyMemoizedContextPanel = lazy(() =>
-  import('./components/App/App').then((module) => ({ default: module.MemoizedContextPanel }))
-);
+const LazyMemoizedContextPanel = lazy(() => import('./components/App/ContextPanel'));
 const LazyAppConfig = lazy(() => import('./components/AppConfig/AppConfig'));
 const LazyTermsAndConditions = lazy(() => import('./components/AppConfig/TermsAndConditions'));
 
@@ -41,7 +39,7 @@ const App = (props: AppRootProps) => (
   </Suspense>
 );
 
-const plugin = new AppPlugin<{}>()
+export const plugin = new AppPlugin<{}>()
   .setRootPage(App)
   .addConfigPage({
     title: 'Configuration',
@@ -54,13 +52,12 @@ const plugin = new AppPlugin<{}>()
     id: 'recommendations-config',
   });
 
-export { plugin };
-
+// Expose the main component for the sidebar
 plugin.addComponent({
   targets: `grafana/extension-sidebar/v0-alpha`,
   title: 'Grafana Pathfinder',
   description: 'Opens Grafana Pathfinder',
-  component: function ContextSidebar() {
+  component: function ContextSidebar(props: { helpNode?: NavModelItem }) {
     React.useEffect(() => {
       reportAppInteraction(UserInteraction.DocsPanelInteraction, {
         action: 'open',
@@ -79,7 +76,53 @@ plugin.addComponent({
 
     return (
       <Suspense fallback={<LoadingPlaceholder text="" />}>
-        <LazyMemoizedContextPanel />
+        <LazyMemoizedContextPanel helpNode={props.helpNode} />
+      </Suspense>
+    );
+  },
+});
+
+plugin.addLink<{ helpNode?: NavModelItem }>({
+  title: 'Grafana Pathfinder',
+  description: 'Open Grafana Pathfinder documentation assistant',
+  targets: ['grafana/app/topbar/help/v1'],
+  onClick: (_, {openSidebar, context}) => {
+    reportAppInteraction(UserInteraction.DocsPanelInteraction, {
+      action: 'open',
+      source: 'help_button',
+      timestamp: Date.now(),
+    });
+
+    openSidebar('Grafana Pathfinder', {
+      helpNode: context?.helpNode,
+    });
+  },
+});
+
+plugin.exposeComponent({
+  id: 'grafana-grafanadocsplugin-app/pathfinder-help/v1',
+  title: 'Grafana Pathfinder',
+  description: 'Grafana Pathfinder documentation assistant',
+  component: function PathfinderHelpSidebar(props: { helpNode?: NavModelItem }) {
+    React.useEffect(() => {
+      reportAppInteraction(UserInteraction.DocsPanelInteraction, {
+        action: 'open',
+        source: 'help_button_sidebar',
+        timestamp: Date.now(),
+      });
+
+      return () => {
+        reportAppInteraction(UserInteraction.DocsPanelInteraction, {
+          action: 'close',
+          source: 'help_button_sidebar_unmount',
+          timestamp: Date.now(),
+        });
+      };
+    }, []);
+
+    return (
+      <Suspense fallback={<LoadingPlaceholder text="" />}>
+        <LazyMemoizedContextPanel helpNode={props.helpNode} />
       </Suspense>
     );
   },
@@ -88,7 +131,7 @@ plugin.addComponent({
 plugin.addLink({
   title: 'Open Grafana Pathfinder',
   description: 'Open Grafana Pathfinder',
-  targets: [PluginExtensionPoints.CommandPalette],
+  targets: ['grafana/commandpalette/action'],
   onClick: () => {
     reportAppInteraction(UserInteraction.DocsPanelInteraction, {
       action: 'open',
@@ -106,7 +149,7 @@ plugin.addLink({
 plugin.addLink({
   title: 'Need help?',
   description: 'Get help with Grafana',
-  targets: [PluginExtensionPoints.CommandPalette],
+  targets: ['grafana/commandpalette/action'],
   onClick: () => {
     reportAppInteraction(UserInteraction.DocsPanelInteraction, {
       action: 'open',
@@ -124,7 +167,7 @@ plugin.addLink({
 plugin.addLink({
   title: 'Learn Grafana',
   description: 'Learn how to use Grafana',
-  targets: [PluginExtensionPoints.CommandPalette],
+  targets: ['grafana/commandpalette/action'],
   onClick: () => {
     reportAppInteraction(UserInteraction.DocsPanelInteraction, {
       action: 'open',

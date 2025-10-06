@@ -2,13 +2,15 @@ import React, { useState } from 'react';
 import { Icon, useTheme2, Modal } from '@grafana/ui';
 import { config } from '@grafana/runtime';
 import { t } from '@grafana/i18n';
+import { NavModelItem } from '@grafana/data';
 import { getHelpFooterStyles } from '../../styles/help-footer.styles';
 
 interface HelpFooterProps {
   className?: string;
+  helpNode?: NavModelItem;
 }
 
-export const HelpFooter: React.FC<HelpFooterProps> = ({ className }) => {
+export const HelpFooter: React.FC<HelpFooterProps> = ({ className, helpNode }) => {
   const theme = useTheme2();
   const styles = getHelpFooterStyles(theme);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
@@ -21,44 +23,67 @@ export const HelpFooter: React.FC<HelpFooterProps> = ({ className }) => {
     setIsHelpModalOpen(false);
   };
 
-  const helpButtons = [
+  // Used when helpNode isn't provided.
+  const defaultHelpButtons = [
     {
       key: 'documentation',
       label: t('helpFooter.buttons.documentation', 'Documentation'),
       icon: 'file-alt' as const,
       href: 'https://grafana.com/docs/grafana/latest/?utm_source=grafana_footer',
+      target: '_blank',
     },
     {
       key: 'support',
       label: t('helpFooter.buttons.support', 'Support'),
       icon: 'question-circle' as const,
       href: 'https://grafana.com/support/?utm_source=grafana_footer',
+      target: '_blank',
     },
     {
       key: 'community',
       label: t('helpFooter.buttons.community', 'Community'),
       icon: 'comments-alt' as const,
       href: 'https://community.grafana.com/?utm_source=grafana_footer',
+      target: '_blank',
     },
     {
       key: 'enterprise',
       label: t('helpFooter.buttons.enterprise', 'Enterprise'),
       icon: 'external-link-alt' as const,
       href: 'https://grafana.com/products/enterprise/?utm_source=grafana_footer',
+      target: '_blank',
     },
     {
       key: 'download',
       label: t('helpFooter.buttons.download', 'Download'),
       icon: 'download-alt' as const,
       href: 'https://grafana.com/grafana/download?utm_source=grafana_footer',
-    },
+      target: '_blank',
+      },
     {
       key: 'shortcuts',
       label: t('helpFooter.buttons.shortcuts', 'Shortcuts'),
       icon: 'keyboard' as const,
       onClick: handleKeyboardShortcuts,
+      target: '_blank',
     },
   ];
+
+  const helpButtons = React.useMemo(() => {
+    if (helpNode?.children && helpNode.children.length > 0) {
+      return helpNode.children
+        .filter((child) => child.text && (child.url || child.onClick))
+        .map((child, index) => ({
+          key: child.id || `help-${index}`,
+          label: child.text || '',
+          icon: (child.icon || 'question-circle') as any,
+          href: child.url,
+          target: child.target,
+          onClick: child.onClick,
+        }));
+    }
+    return defaultHelpButtons;
+  }, [helpNode]);
 
   return (
     <div className={`${styles.helpFooter} ${className || ''}`}>
@@ -68,7 +93,7 @@ export const HelpFooter: React.FC<HelpFooterProps> = ({ className }) => {
           const buttonProps = button.href
             ? {
                 href: button.href,
-                target: '_blank',
+                target: button.target || '_blank',
                 rel: 'noopener noreferrer',
               }
             : {
